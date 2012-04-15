@@ -15,6 +15,7 @@ public class SortPlan implements Plan {
    private Transaction tx;
    private Schema sch;
    private RecordComparator comp;
+   private int recordsPerBlock;
    
    /**
     * Creates a sort plan for the specified query.
@@ -24,6 +25,7 @@ public class SortPlan implements Plan {
     */
    public SortPlan(Plan p, List<String> sortfields, Transaction tx) {
       this.p = p;
+      recordsPerBlock = p.recordsOutput() / p.blocksAccessed();
       this.tx = tx;
       sch = p.schema();
       comp = new RecordComparator(sortfields);
@@ -39,6 +41,7 @@ public class SortPlan implements Plan {
       Scan src = p.open();
       List<TempTable> runs = splitIntoRuns(src);
       src.close();
+      // Print the contents of the initial runs
       while (runs.size() > 2)
          runs = doAMergeIteration(runs);
       return new SortScan(runs, comp);
@@ -94,13 +97,19 @@ public class SortPlan implements Plan {
       TempTable currenttemp = new TempTable(sch, tx);
       temps.add(currenttemp);
       UpdateScan currentscan = currenttemp.open();
-      while (copy(src, currentscan))
-         if (comp.compare(src, currentscan) < 0) {
-         // start a new run
-         currentscan.close();
-         currenttemp = new TempTable(sch, tx);
-         temps.add(currenttemp);
-         currentscan = (UpdateScan) currenttemp.open();
+      int recordsInserted = 0;
+      while (copy(src, currentscan)){
+        recordsInserted++;
+        if(recordsInserted==recordsPerBlock){
+          recordsInserted = 0;
+          // Sort the records in the currentscan
+          sortScan(currentscan);
+          // close the scan and open another
+          currentscan.close();
+          currenttemp = new TempTable(sch, tx);
+          temps.add(currenttemp);
+          currentscan = (UpdateScan) currenttemp.open();
+        }
       }
       currentscan.close();
       return temps;
@@ -149,5 +158,38 @@ public class SortPlan implements Plan {
       for (String fldname : sch.fields())
          dest.setVal(fldname, src.getVal(fldname));
       return src.next();
+   }
+
+   // Sort the records in the update scan
+   private void sortScan(UpdateScan scan){
+     // make temporary update scans to hold the sorted records
+     UpdateScan tempScan = new TempTable(sch, tx).open();
+     UpdateScan newScan = new TempTable(sch, tx).open();
+     boolean more;
+     int i;
+     RID minRid;
+     for(i=0; i<recordsPerBlock; i++){
+       scan.beforeFirst();
+       minRid = scan.getRid();
+       more = copy(scan, tempScan);
+       while(more){
+         // find minimum record in scan
+         if(comp.compare(scan, tempScan) < 0){
+           // record in scan is smaller so switch
+           tempScan.delete();
+           minRid = scan.getRid();
+           more = copy(scan, tempScan);
+         }
+         else{
+           more = scan.next();
+         }
+       }
+       // copy min record in tempScan to newScan
+       copy(tempScan, newScan);
+       // delete min record from scan
+       scan.moveToRid(minRid);
+       scan.delete();
+     }
+     scan = newScan;
    }
 }
