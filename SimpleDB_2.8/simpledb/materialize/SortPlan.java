@@ -16,6 +16,7 @@ public class SortPlan implements Plan {
    private Schema sch;
    private RecordComparator comp;
    private int recordsPerBlock;
+   private int runs;
    
    /**
     * Creates a sort plan for the specified query.
@@ -24,11 +25,20 @@ public class SortPlan implements Plan {
     * @param tx the calling transaction
     */
    public SortPlan(Plan p, List<String> sortfields, Transaction tx) {
-      this.p = p;
-      recordsPerBlock = p.recordsOutput() / p.blocksAccessed();
-      this.tx = tx;
-      sch = p.schema();
-      comp = new RecordComparator(sortfields);
+      this(p, sortfields, tx, 2); // default to 2 runs
+   }
+
+   /**
+    * Create a sort plan for the specified query that merges 
+    * k runs at a time
+    */
+   public SortPlan(Plan p, List<String> sortfields, Transaction tx, int runs){
+     this.p = p;
+     recordsPerBlock = p.recordsOutput() / p.blocksAccessed();
+     this.tx = tx;
+     sch = p.schema();
+     comp = new RecordComparator(sortfields);
+     this.runs = runs;
    }
    
    /**
