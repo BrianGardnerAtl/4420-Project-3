@@ -26,17 +26,17 @@ public class MergeDriver2{
 		s.insert();
 	    s.setInt("col1",(180-i));
 	    s.setString("col2","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-		System.out.println(180-i);
+		System.out.printf("insert: %d\n",(180-i));
 		s.insert();
 		s.setInt("col1",(101+i));
 	    s.setString("col2","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-		System.out.println(101+i);
+		System.out.printf("insert: %d\n",(101+i));
 	  }
 	  s.close();
 	  List<String> fields = new ArrayList<String>();
 	  fields.add("col1");
 	  fields.add("col2");
-	  SortPlan sp = new SortPlan(p, fields, tx, 3);
+	  SortPlan sp = new SortPlan(p, fields, tx, 4);
 	  sp.open();
 	}
 }
