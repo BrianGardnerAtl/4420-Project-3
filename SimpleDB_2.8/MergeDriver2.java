@@ -9,7 +9,7 @@ import simpledb.record.TableInfo;
 import simpledb.tx.Transaction;
 import java.util.*;
 
-public class MergeDriver{
+public class MergeDriver2{
 
    
 	public static void main(String[] args) {
