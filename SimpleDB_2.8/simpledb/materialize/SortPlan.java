@@ -15,8 +15,9 @@ public class SortPlan implements Plan {
    private Transaction tx;
    private Schema sch;
    private RecordComparator comp;
-   private int recordsPerBlock;
-   private int runs;
+   private int k;
+   private int recordsPerBlock = 5;
+   private List<String> sortfields;
    
    /**
     * Creates a sort plan for the specified query.
@@ -24,22 +25,19 @@ public class SortPlan implements Plan {
     * @param sortfields the fields to sort by
     * @param tx the calling transaction
     */
-   public SortPlan(Plan p, List<String> sortfields, Transaction tx) {
+	
+	public SortPlan(Plan p, List<String> sortfields, Transaction tx) {
       this(p, sortfields, tx, 2); // default to 2 runs
-   }
-
-   /**
-    * Create a sort plan for the specified query that merges 
-    * k runs at a time
-    */
-   public SortPlan(Plan p, List<String> sortfields, Transaction tx, int runs){
-     this.p = p;
-     recordsPerBlock = p.recordsOutput() / p.blocksAccessed();
-     this.tx = tx;
-     sch = p.schema();
-     comp = new RecordComparator(sortfields);
-     this.runs = runs;
-   }
+	}
+	
+	public SortPlan(Plan p, List<String> sortfields, Transaction tx, int k) {
+	  this.sortfields = sortfields;
+	  this.k = k;
+      this.p = p;
+      this.tx = tx;
+      sch = p.schema();
+      comp = new RecordComparator(sortfields);
+	}
    
    /**
     * This method is where most of the action is.
@@ -48,12 +46,19 @@ public class SortPlan implements Plan {
     * @see simpledb.query.Plan#open()
     */
    public Scan open() {
-      Scan src = p.open();
+      UpdateScan src = (UpdateScan)p.open();
+	  src.beforeFirst();
       List<TempTable> runs = splitIntoRuns(src);
+	  System.out.println("Initial");
+	  System.out.println("-------------");
+	  printContents(runs);
       src.close();
-      // Print the contents of the initial runs
-      while (runs.size() > 2)
+      while (runs.size() > 1){
          runs = doAMergeIteration(runs);
+		 System.out.println("Merge Iteration");
+		 System.out.println("-------------");
+		 printContents(runs);
+	  }
       return new SortScan(runs, comp);
    }
    
@@ -99,13 +104,15 @@ public class SortPlan implements Plan {
       return sch;
    }
    
+   
+   
    private List<TempTable> splitIntoRuns(Scan src) {
       List<TempTable> temps = new ArrayList<TempTable>();
       src.beforeFirst();
-      if (!src.next())
+      if (!src.next()){
          return temps;
+	  }
       TempTable currenttemp = new TempTable(sch, tx);
-      temps.add(currenttemp);
       UpdateScan currentscan = currenttemp.open();
       int recordsInserted = 0;
       while (copy(src, currentscan)){
@@ -113,28 +120,87 @@ public class SortPlan implements Plan {
         if(recordsInserted==recordsPerBlock){
           recordsInserted = 0;
           // Sort the records in the currentscan
-          sortScan(currentscan);
-          // close the scan and open another
-          currentscan.close();
+		  currentscan.close();
+          currenttemp = sortRun(currenttemp);
+		  temps.add(currenttemp);
           currenttemp = new TempTable(sch, tx);
-          temps.add(currenttemp);
           currentscan = (UpdateScan) currenttemp.open();
         }
       }
       currentscan.close();
+	  currenttemp = sortRun(currenttemp);
+	  temps.add(currenttemp);
       return temps;
    }
    
    private List<TempTable> doAMergeIteration(List<TempTable> runs) {
-      List<TempTable> result = new ArrayList<TempTable>();
-      while (runs.size() > 1) {
-         TempTable p1 = runs.remove(0);
-         TempTable p2 = runs.remove(0);
-         result.add(mergeTwoRuns(p1, p2));
-      }
-      if (runs.size() == 1)
-         result.add(runs.get(0));
-      return result;
+		int i;
+		int runsize = runs.size();
+		List<TempTable> toMerge;
+		List<TempTable> result = new ArrayList<TempTable>();
+		while(runs.size() > (k-1)) {
+			toMerge = new ArrayList<TempTable>();
+			for(i = 0; i<k; i++){
+				toMerge.add(runs.remove(0));
+			}
+			result.add(mergeRuns(toMerge));
+		}
+		//this will occur if (number of runs)%(k)!= 0. The remaining elements are merged just as the previous.
+		while(runs.size()>0){
+			toMerge = new ArrayList<TempTable>();
+			for (i=0; i<runsize; i++){
+				toMerge.add(runs.remove(0));
+			}
+			result.add(mergeRuns(toMerge));
+		}
+
+		return result;
+   }
+   //creates one sorted run from a list of sorted runs
+   private TempTable mergeRuns(List<TempTable> runs) {
+		List<Scan> scans = new ArrayList<Scan>();
+		boolean more, first;
+		int i;
+		int smallest=0;
+		int scanIndex=0;
+		TempTable result = new TempTable(sch,tx);
+		UpdateScan dest = result.open();
+		//open a scan for each run
+		for (TempTable run : runs){
+			Scan s = run.open();
+			//point to first element in the scan
+			s.next();
+			scans.add(s);
+		}
+		//runs until nothing remains to be added
+		while(scans.size()>0){
+			first = true;
+			for (i=0;i<scans.size(); i++){
+				//on the first encounted element
+				if(first){
+					smallest = scans.get(i).getInt(sortfields.get(0));
+					scanIndex = i;
+					first = false;
+				}
+				//on each remaining elements
+				else if(scans.get(i).getInt(sortfields.get(0))<smallest){
+					smallest = scans.get(i).getInt(sortfields.get(0));
+					scanIndex = i;
+				}
+			}
+			more = copy(scans.get(scanIndex),dest);
+			//if all of a run's elements have been added to the merge, close the associated scan and remove it from the list
+			if(!more){
+				scans.get(scanIndex).close();
+				scans.remove(scanIndex);
+			}
+		}
+		dest.close();
+		//close all scans
+		for (Scan s : scans){
+			s.close();
+		}
+		return result;
    }
    
    private TempTable mergeTwoRuns(TempTable p1, TempTable p2) {
@@ -165,41 +231,56 @@ public class SortPlan implements Plan {
    
    private boolean copy(Scan src, UpdateScan dest) {
       dest.insert();
-      for (String fldname : sch.fields())
+      for (String fldname : sch.fields()){
          dest.setVal(fldname, src.getVal(fldname));
+	  }
       return src.next();
    }
-
-   // Sort the records in the update scan
-   private void sortScan(UpdateScan scan){
+   
+   // Sort the records in a given run
+   private TempTable sortRun(TempTable t){
      // make temporary update scans to hold the sorted records
-     UpdateScan tempScan = new TempTable(sch, tx).open();
-     UpdateScan newScan = new TempTable(sch, tx).open();
-     boolean more;
-     int i;
-     RID minRid;
-     for(i=0; i<recordsPerBlock; i++){
-       scan.beforeFirst();
-       minRid = scan.getRid();
-       more = copy(scan, tempScan);
-       while(more){
-         // find minimum record in scan
-         if(comp.compare(scan, tempScan) < 0){
-           // record in scan is smaller so switch
-           tempScan.delete();
-           minRid = scan.getRid();
-           more = copy(scan, tempScan);
-         }
-         else{
-           more = scan.next();
-         }
-       }
-       // copy min record in tempScan to newScan
-       copy(tempScan, newScan);
-       // delete min record from scan
-       scan.moveToRid(minRid);
-       scan.delete();
-     }
-     scan = newScan;
+	 boolean next = true;
+	 UpdateScan scan, s;
+	 TempTable temp;
+	 TempTable sorted = new TempTable(sch,tx);
+	 List<TempTable> runs = new ArrayList<TempTable>();
+	 scan = t.open();
+	 scan.next();
+	 while(next){
+		temp = new TempTable(sch,tx);
+		s = temp.open();
+		s.beforeFirst();
+		next = copy(scan,s);
+		s.close();
+		sorted = mergeTwoRuns(temp,sorted);
+	 }
+	 scan.close();
+	 return sorted;
+	}
+   
+   public void printContents(List<TempTable> runs){
+	int count;
+	int runCount = 0;
+	for(TempTable run : runs){
+		runCount++;
+		count = 0;
+		Scan s = run.open();
+		s.beforeFirst();
+		System.out.printf("Run %d:\n", runCount); 
+		while(s.next()){
+			count++;
+			int val = s.getInt(sortfields.get(0));
+			System.out.print(val);
+			if(count == recordsPerBlock){
+				System.out.print("\n");
+				count=0;
+			}
+			else{
+				System.out.print("\t");
+			}
+		}
+		s.close();
+   }
    }
 }
