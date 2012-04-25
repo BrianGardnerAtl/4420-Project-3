@@ -59,6 +59,9 @@ public class SortPlan implements Plan {
 		 System.out.println("-------------");
 		 printContents(runs);
 	  }
+	  if(runs.size()<1){
+		return null;
+	  }
       return new SortScan(runs, comp);
    }
    

@@ -16,6 +16,23 @@ public class MergeDriver{
 	  SimpleDB.init("studentdb"); 
 	  Transaction tx = new Transaction();
 	  Plan p = new TablePlan("messy", tx);
+	  UpdateScan s = (UpdateScan)p.open();
+	  //remove rows from table
+	  while(s.next()){
+		s.delete();
+	  }
+	  s.beforeFirst();
+	  for(int i = 0; i<40; i++){
+		s.insert();
+	    s.setInt("col1",(180-i));
+	    s.setString("col2","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+		System.out.println(180-i);
+		s.insert();
+		s.setInt("col1",(101+i));
+	    s.setString("col2","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+		System.out.println(101+i);
+	  }
+	  s.close();
 	  List<String> fields = new ArrayList<String>();
 	  fields.add("col1");
 	  fields.add("col2");
