@@ -148,15 +148,12 @@ public class SortPlan implements Plan {
 			}
 			result.add(mergeRuns(toMerge));
 		}
+		toMerge = new ArrayList<TempTable>();
 		//this will occur if (number of runs)%(k)!= 0. The remaining elements are merged just as the previous.
 		while(runs.size()>0){
-			toMerge = new ArrayList<TempTable>();
-			for (i=0; i<runsize; i++){
-				toMerge.add(runs.remove(0));
-			}
-			result.add(mergeRuns(toMerge));
+			toMerge.add(runs.remove(0));
 		}
-
+		result.add(mergeRuns(toMerge));
 		return result;
    }
    //creates one sorted run from a list of sorted runs
@@ -284,6 +281,7 @@ public class SortPlan implements Plan {
 			}
 		}
 		s.close();
+		System.out.print("\n");
    }
    }
 }
